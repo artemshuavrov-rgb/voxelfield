@@ -166,6 +166,25 @@ namespace Voxelfield.Session
             return StartSession(host);
         }
 
+        public static Host StartSoloDemo()
+        {
+            // The original default is CTF, which waits for loadout selection and manual respawn.
+            // Deathmatch supplies the full arsenal and spawns a local player immediately.
+            DisconnectAll();
+            Config.Active.modeId.Value = ModeIdProperty.Deathmatch;
+            Config.Active.mapName.SetTo("Castle");
+            Config.Active.showDebugInterface.Value = false;
+            return StartHost();
+        }
+
+#if UNITY_EDITOR
+        [MenuItem("Session/Start Solo Demo")]
+        private static void StartSoloDemoFromEditor() => StartSoloDemo();
+
+        [MenuItem("Session/Start Solo Demo", true)]
+        private static bool CanStartSoloDemoFromEditor() => EditorApplication.isPlaying;
+#endif
+
         public static Server StartServer(IPEndPoint ipEndPoint = null)
         {
             ipEndPoint ??= DefaultEndPoint;
