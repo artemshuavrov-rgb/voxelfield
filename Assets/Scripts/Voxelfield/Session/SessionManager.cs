@@ -7,6 +7,7 @@ using Swihoni.Components;
 using Swihoni.Sessions;
 using Swihoni.Sessions.Components;
 using Swihoni.Sessions.Config;
+using Swihoni.Sessions.Items.Modifiers;
 using Swihoni.Sessions.Player.Components;
 using Swihoni.Util;
 using UnityEngine;
@@ -39,6 +40,7 @@ namespace Voxelfield.Session
 
         private void Start()
         {
+            GunModifierBase.WorldHit += OnGunWorldHit;
             QualitySettings.vSyncCount = 0;
             SetCommand("host", arguments => StartHost(GetEndPoint(arguments)));
             SetCommand("edit", arguments => StartEdit(arguments));
@@ -177,6 +179,27 @@ namespace Voxelfield.Session
             return StartHost();
         }
 
+        private static void OnGunWorldHit(SessionContext context, RaycastHit hit, byte itemId)
+        {
+            if (context.session.GetLatestSession().Require<ModeIdProperty>() != ModeIdProperty.Deathmatch
+             || context.session.Injector is not ServerInjector server
+             || !hit.collider.TryGetComponent(out Chunk _)) return;
+
+            float radius = itemId switch
+            {
+                ItemId.Shotgun => 1.8f,
+                ItemId.Sniper => 1.5f,
+                _ => 1.1f
+            };
+            server.ApplyVoxelChanges(new VoxelChange
+            {
+                position = (Swihoni.Util.Math.Position3Int)(hit.point - hit.normal * 0.12f),
+                form = VoxelVolumeForm.Spherical,
+                magnitude = -radius,
+                modifiesBlocks = true
+            });
+        }
+
 #if UNITY_EDITOR
         [MenuItem("Session/Start Solo Demo")]
         private static void StartSoloDemoFromEditor() => StartSoloDemo();
@@ -299,6 +322,8 @@ namespace Voxelfield.Session
             DisconnectAll();
             AnalysisLogger.FlushAll();
         }
+
+        private void OnDestroy() => GunModifierBase.WorldHit -= OnGunWorldHit;
 
 #if UNITY_EDITOR
         [MenuItem("Voxelfield/Save Custom Map")]

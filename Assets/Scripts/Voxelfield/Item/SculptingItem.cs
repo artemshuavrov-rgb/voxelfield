@@ -56,7 +56,8 @@ namespace Voxelfield.Item
         {
             Voxel? voxel = context.GetChunkManager().GetVoxel(position);
             outVoxel = voxel ?? default;
-            return !voxel.HasValue || !outVoxel.IsBreakable && !OverrideBreakable;
+            bool soloDemo = context.session.GetLatestSession().Require<ModeIdProperty>() == ModeIdProperty.Deathmatch;
+            return !voxel.HasValue || !outVoxel.IsBreakable && !OverrideBreakable && !soloDemo;
         }
 
         protected bool WithoutHit(in SessionContext context, float distance, out RaycastHit hit)

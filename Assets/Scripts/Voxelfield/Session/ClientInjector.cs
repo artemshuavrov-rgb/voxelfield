@@ -53,7 +53,9 @@ namespace Voxelfield.Session
             // ReSharper disable once ForeachCanBePartlyConvertedToQueryUsingAnotherGetEnumerator - Avoid allocation
             foreach (OrderedVoxelChangesProperty changes in m_OrderedTickChanges.Values)
             foreach (VoxelChange change in changes.List)
-                m_MapManager.ChunkManager.ApplyVoxelChanges(change, existingTouched: m_TouchedChunks);
+                // Changes are validated by the server; replay them even when the local
+                // source voxel was marked unbreakable in the map asset.
+                m_MapManager.ChunkManager.ApplyVoxelChanges(change, existingTouched: m_TouchedChunks, overrideBreakable: true);
             m_TouchedChunks.UpdateMesh();
             m_OrderedTickChanges.Clear();
             m_ChangesPool.ReturnAll();

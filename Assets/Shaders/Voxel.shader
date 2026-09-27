@@ -3,6 +3,9 @@
     Properties
     {
         _MainTex ("Albedo (RGB)", 2D) = "white" {}
+        _Tint ("Debris Tint", Color) = (1,1,1,1)
+        _EmissionColor ("Debris Glow", Color) = (0,0,0,0)
+        _DebrisColorStrength ("Debris Color Strength", Range(0,1)) = 0
         _Glossiness ("Smoothness", Range(0,1)) = 0.5
         _Metallic ("Metallic", Range(0,1)) = 0.0
     }
@@ -28,6 +31,9 @@
 
         half _Glossiness;
         half _Metallic;
+        fixed4 _Tint;
+        fixed4 _EmissionColor;
+        half _DebrisColorStrength;
 
         // Add instancing support for this shader. You need to check 'Enable Instancing' on materials that use the shader.
         // See https://docs.unity3d.com/Manual/GPUInstancing.html for more information about instancing.
@@ -40,7 +46,8 @@
         {
             // Albedo comes from a texture tinted by color
             fixed4 c = tex2D (_MainTex, IN.uv_MainTex) * IN.vertColor;
-            o.Albedo = c.rgb;
+            o.Albedo = lerp(c.rgb * _Tint.rgb, _Tint.rgb, _DebrisColorStrength);
+            o.Emission = _EmissionColor.rgb;
             // Metallic and smoothness come from slider variables
             o.Metallic = _Metallic;
             o.Smoothness = _Glossiness;

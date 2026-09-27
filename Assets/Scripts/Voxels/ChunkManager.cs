@@ -158,6 +158,7 @@ namespace Voxels
         private static readonly TouchedChunks TouchedChunks = new();
 
         private static readonly ProfilerMarker ApplyVoxelChangeMarker = new("Apply Voxel Change");
+        private const int MaxDebrisSamplesPerEdit = 24;
 
         /// <summary>
         /// Change the data of a chunk in the array.
@@ -171,6 +172,8 @@ namespace Voxels
             using (ApplyVoxelChangeMarker.Auto())
             {
                 TouchedChunks touched = existingTouched ?? TouchedChunks;
+                List<VoxelDestructionSample> destructionSamples = null;
+                Vector3 destructionOrigin = default;
                 if (change.isUndo)
                 {
                     foreach ((Chunk chunk, Position3Int position, Voxel voxel) in change.undo)
@@ -183,6 +186,10 @@ namespace Voxels
                 else
                 {
                     Position3Int worldPosition = change.position.Value;
+                    destructionOrigin = (Vector3) worldPosition + Vector3.one * 0.5f;
+                    if (updateSave) destructionSamples = new List<VoxelDestructionSample>(MaxDebrisSamplesPerEdit);
+                    int removedCount = 0;
+                    var sampleRandom = new System.Random(worldPosition.GetHashCode());
                     Random.InitState(worldPosition.GetHashCode());
 
                     VoxelChange GetEvaluated(in VoxelChange originalChange, Chunk chunk, in Position3Int voxelChunkPosition, bool mergeOriginal = true)
@@ -194,9 +201,30 @@ namespace Voxels
 
                     void SetEvaluatedVoxel(in VoxelChange originalChange, in VoxelChange evaluatedChange, Chunk chunk, in Position3Int voxelChunkPosition)
                     {
+                        Voxel before = chunk.GetVoxelNoCheck(voxelChunkPosition);
                         // ReSharper disable once PossibleInvalidOperationException
-                        originalChange.undo?.Add((chunk, voxelChunkPosition, chunk.GetVoxelNoCheck(voxelChunkPosition)));
+                        originalChange.undo?.Add((chunk, voxelChunkPosition, before));
                         chunk.SetVoxelDataNoCheck(voxelChunkPosition, evaluatedChange);
+                        if (destructionSamples != null)
+                        {
+                            Voxel after = chunk.GetVoxelNoCheck(voxelChunkPosition);
+                            bool removedBlock = before.HasBlock && !after.HasBlock;
+                            bool removedTerrain = !before.HasBlock && before.density >= 128 && after.density < 128;
+                            if (removedBlock || removedTerrain)
+                            {
+                                removedCount++;
+                                var sample = new VoxelDestructionSample(
+                                    (Vector3)(voxelChunkPosition + chunk.Position * m_ChunkSize) + Vector3.one * 0.5f,
+                                    before.color, before.texture);
+                                if (destructionSamples.Count < MaxDebrisSamplesPerEdit)
+                                    destructionSamples.Add(sample);
+                                else
+                                {
+                                    int slot = sampleRandom.Next(removedCount);
+                                    if (slot < MaxDebrisSamplesPerEdit) destructionSamples[slot] = sample;
+                                }
+                            }
+                        }
                         AddChunksToUpdateFromVoxel(voxelChunkPosition, chunk, touched);
                     }
 
@@ -325,6 +353,13 @@ namespace Voxels
                     if (updateSave) Map.voxelChanges.Append(change);
                 }
                 if (existingTouched is null) TouchedChunks.UpdateMesh();
+                if (destructionSamples is {Count: > 0} && !Application.isBatchMode)
+                {
+                    var effects = GetComponent<VoxelDestructionEffects>();
+                    if (!effects) effects = gameObject.AddComponent<VoxelDestructionEffects>();
+                    effects.Initialize(m_ChunkPrefab.GetComponentInChildren<MeshRenderer>().sharedMaterial);
+                    effects.Emit(destructionSamples, destructionOrigin);
+                }
             }
         }
 

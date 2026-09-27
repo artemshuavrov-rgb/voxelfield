@@ -24,6 +24,8 @@ namespace Voxelfield.Session
 
         public void ApplyVoxelChanges(VoxelChange change, TouchedChunks touchedChunks = null, bool overrideBreakable = false)
         {
+            // The solo deathmatch demo allows every terrain material to be damaged.
+            overrideBreakable |= Session.GetLatestSession().Require<ModeIdProperty>() == ModeIdProperty.Deathmatch;
             void Apply() => m_MapManager.ChunkManager.ApplyVoxelChanges(change, true, touchedChunks, overrideBreakable);
             if (change.isUndo)
             {

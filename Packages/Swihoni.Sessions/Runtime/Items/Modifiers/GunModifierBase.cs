@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Swihoni.Sessions.Components;
 using Swihoni.Sessions.Modes;
@@ -19,6 +20,7 @@ namespace Swihoni.Sessions.Items.Modifiers
 
     public abstract class GunModifierBase : WeaponModifierBase
     {
+        public static event Action<SessionContext, RaycastHit, byte> WorldHit;
         private const int MaxRaycastDetections = 24;
 
         protected static readonly RaycastHit[] RaycastHits = new RaycastHit[MaxRaycastDetections];
@@ -92,10 +94,21 @@ namespace Swihoni.Sessions.Items.Modifiers
             session.RollbackHitboxesFor(context);
 
             int hitCount = FireRaycast(context, ray);
+            RaycastHit nearestWorldHit = default;
+            float nearestWorldDistance = float.PositiveInfinity;
             for (var hitIndex = 0; hitIndex < hitCount; hitIndex++)
             {
                 RaycastHit hit = RaycastHits[hitIndex];
-                if (!hit.collider.TryGetComponent(out PlayerHitbox hitbox) || hitbox.Manager.PlayerId == context.playerId || HitPlayers.Contains(hitbox.Manager)) continue;
+                if (!hit.collider.TryGetComponent(out PlayerHitbox hitbox))
+                {
+                    if (hit.distance < nearestWorldDistance)
+                    {
+                        nearestWorldHit = hit;
+                        nearestWorldDistance = hit.distance;
+                    }
+                    continue;
+                }
+                if (hitbox.Manager.PlayerId == context.playerId || HitPlayers.Contains(hitbox.Manager)) continue;
                 HitPlayers.Add(hitbox.Manager);
                 if (context.player.With<ServerTag>())
                 {
@@ -104,6 +117,8 @@ namespace Swihoni.Sessions.Items.Modifiers
                 }
             }
             HitPlayers.Clear();
+            if (nearestWorldDistance < float.PositiveInfinity && context.player.With<ServerTag>())
+                WorldHit?.Invoke(context, nearestWorldHit, item.id);
 
             inventory.tracerStart.Value = ray.origin;
             inventory.tracerEnd.Value = hitCount > 0 ? RaycastHits[hitCount - 1].point : ray.GetPoint(300.0f);

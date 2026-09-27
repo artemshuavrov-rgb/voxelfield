@@ -61,7 +61,7 @@ namespace Voxelfield.Interface
             DemoUi.Box(home, "Rule", new Vector2(74, 4), new Vector2(-264, 89), DemoUi.Accent);
             DemoUi.Text(home, "Tagline", "BREAK THE WORLD.", new Vector2(600, 50),
                         new Vector2(0, 50), 27, DemoUi.White, style: TMPro.FontStyles.Bold);
-            DemoUi.Text(home, "Description", "Explore the arena with the full arsenal. Use the pickaxe and explosives to carve a path through destructible voxel terrain.",
+            DemoUi.Text(home, "Description", "Explore the arena with the full arsenal. Bullets, the pickaxe and explosives carve paths through every voxel material.",
                         new Vector2(600, 76), new Vector2(0, -6), 18, DemoUi.Muted);
             m_StartButton = DemoUi.Button(home, "Start demo", "START SOLO DEMO", new Vector2(288, 54),
                                           new Vector2(-156, -91), true, StartDemo);
@@ -77,7 +77,7 @@ namespace Voxelfield.Interface
             var controls = m_ControlsPage.transform;
             DemoUi.Text(controls, "Title", "HOW TO PLAY", new Vector2(620, 64),
                         new Vector2(0, 196), 44, DemoUi.White, style: TMPro.FontStyles.Bold);
-            DemoUi.Text(controls, "Introduction", "The Castle is yours to explore. The rifle is ready at spawn; select the pickaxe or explosives to destroy terrain.",
+            DemoUi.Text(controls, "Introduction", "The Castle is yours to explore. Shoot, dig or use explosives to break voxel terrain and watch colorful debris scatter.",
                         new Vector2(620, 78), new Vector2(0, 122), 18, DemoUi.Muted);
             DemoUi.Text(controls, "Controls list",
                         "W A S D       Move                    MOUSE       Look / fire\n" +
