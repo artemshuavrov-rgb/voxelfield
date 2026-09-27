@@ -63,6 +63,7 @@ namespace Voxels
             m_VisualRebuildChunk = null;
             Map = map;
             m_StructuralGravity ??= new VoxelStructuralGravity(this);
+            m_StructuralGravity.Reset();
             m_LoadedMap = map.Clone();
             SetPoolSize(map);
             // Decommission all current chunks
@@ -84,6 +85,7 @@ namespace Voxels
         private void Update()
         {
             if (ProgressInfo.stage != MapLoadingStage.Completed) return;
+            m_StructuralGravity?.Tick();
             // A fixed two coarse-voxel slices per frame bounds the work even
             // when a blast touches several chunks at once.
             int slicesLeft = 2;
@@ -225,6 +227,7 @@ namespace Voxels
                 Vector3 destructionOrigin = default;
                 if (change.isUndo)
                 {
+                    m_StructuralGravity?.NotifyTopologyChanged();
                     foreach ((Chunk chunk, Position3Int position, Voxel voxel) in change.undo)
                     {
                         chunk.SetVoxelDataRawNoCheck(position, voxel);
@@ -263,8 +266,7 @@ namespace Voxels
                             if (removedBlock || removedTerrain)
                             {
                                 removedCount++;
-                                if (removedPositions.Count < 96)
-                                    removedPositions.Add(voxelChunkPosition + chunk.Position * m_ChunkSize);
+                                removedPositions.Add(voxelChunkPosition + chunk.Position * m_ChunkSize);
                                 var sample = new VoxelDestructionSample(
                                     (Vector3)(voxelChunkPosition + chunk.Position * m_ChunkSize) + Vector3.one * 0.5f,
                                     before.color, before.texture);

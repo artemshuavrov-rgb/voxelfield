@@ -425,7 +425,8 @@ namespace Voxels
             AddToMeshMarker = new("Add to Mesh");
 
         public static void RenderVoxels(ChunkManager manager, Chunk chunk, MeshData solidMesh, MeshData foliageMesh,
-                                        int detail = SurfaceDetail, int startX = 0, int endX = -1)
+                                        int detail = SurfaceDetail, int startX = 0, int endX = -1,
+                                        bool colliderOnly = true)
         {
             Position3Int lowerBound = manager.Map.dimension.lowerBound;
             int chunkSize = manager.ChunkSize;
@@ -447,7 +448,7 @@ namespace Voxels
                             Voxel? adjacentVoxel = chunk.GetVoxel(new Position3Int(x, y, z) + Adjacents[orientation]);
                             if (adjacentVoxel?.ShouldRenderBlock(orientation) ?? true)
                             {
-                                if (detail == 1) GenerateBlock(ref voxel, x, y, z, orientation, solidMesh, true);
+                                if (detail == 1) GenerateBlock(ref voxel, x, y, z, orientation, solidMesh, colliderOnly);
                                 else GenerateDetailedBlock(ref voxel, x, y, z, orientation, solidMesh, detail);
                             }
                         }
@@ -482,7 +483,7 @@ namespace Voxels
                     if (detail == 1)
                     {
                         bool foliageGenerated = false;
-                        GenerateSmoothCell(ref voxel, solidMesh, foliageMesh, cubeIndex, ref foliageGenerated, true);
+                        GenerateSmoothCell(ref voxel, solidMesh, foliageMesh, cubeIndex, ref foliageGenerated, colliderOnly);
                     }
                     else
                         GenerateDetailedCell(x, y, z, ref voxel, solidMesh, foliageMesh, detail);

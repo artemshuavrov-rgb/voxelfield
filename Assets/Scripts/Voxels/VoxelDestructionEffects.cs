@@ -23,7 +23,7 @@ namespace Voxels
     {
         private const int MaxPieces = 144;
         private const int MaxPiecesPerEdit = 24;
-        private const float Lifetime = 2.8f;
+        private const float Lifetime = 1.5f;
 
         private sealed class Piece
         {
@@ -117,7 +117,7 @@ namespace Voxels
                     m_Properties.SetColor("_EmissionColor", tint * 0.22f);
                     m_Properties.SetFloat("_DebrisColorStrength", 0.48f);
                     piece.renderer.SetPropertyBlock(m_Properties);
-                    piece.body.linearVelocity = direction * (collapse ? Random.Range(1.5f, 3.5f) : Random.Range(2.8f, 7.2f));
+                    piece.body.linearVelocity = direction * (collapse ? Random.Range(3.2f, 5.5f) : Random.Range(4.0f, 8.5f));
                     piece.body.angularVelocity = Random.insideUnitSphere * Random.Range(4f, 12f);
                 }
 
@@ -130,7 +130,7 @@ namespace Voxels
                         velocity = (Random.insideUnitSphere + Vector3.up * 0.8f) * Random.Range(2f, 5f),
                         startColor = sparkColor,
                         startSize = Random.Range(0.09f, 0.21f),
-                        startLifetime = Random.Range(0.32f, 0.68f)
+                        startLifetime = Random.Range(0.22f, 0.48f)
                     };
                     m_Sparks.Emit(spark, 1);
                 }
@@ -148,7 +148,7 @@ namespace Voxels
                     piece.gameObject.SetActive(false);
                     continue;
                 }
-                float shrink = Mathf.Clamp01((Lifetime - piece.age) / 0.7f);
+                float shrink = Mathf.Clamp01((Lifetime - piece.age) / 0.35f);
                 piece.gameObject.transform.localScale = Vector3.one * (piece.size * shrink);
             }
         }

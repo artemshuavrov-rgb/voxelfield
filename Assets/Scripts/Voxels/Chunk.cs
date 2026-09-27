@@ -78,6 +78,7 @@ namespace Voxels
         private void SetCommission(bool inCommission)
         {
             ClearMeshes();
+            m_SolidMeshFilter.sharedMesh = m_SolidMesh;
             m_SolidMeshData.Clear();
             m_ColliderMeshData.Clear();
             m_InCommission = inCommission;
@@ -187,10 +188,14 @@ namespace Voxels
         private void UpdateColliderMesh()
         {
             m_ColliderMeshData.Clear();
-            VoxelRenderer.RenderVoxels(m_ChunkManager, this, m_ColliderMeshData, null, 1);
+            // The coarse mesh shows the edit now; the detailed mesh follows in
+            // small slices without keeping the destroyed shape on screen.
+            VoxelRenderer.RenderVoxels(m_ChunkManager, this, m_ColliderMeshData, null, 1,
+                                       colliderOnly: false);
             MeshCollider.sharedMesh = null;
-            ApplyMesh(m_ColliderMesh, m_ColliderMeshData, true);
+            ApplyMesh(m_ColliderMesh, m_ColliderMeshData);
             MeshCollider.sharedMesh = m_ColliderMesh;
+            m_SolidMeshFilter.sharedMesh = m_ColliderMesh;
         }
 
         public void BeginVisualRebuild()
@@ -207,6 +212,7 @@ namespace Voxels
         {
             ApplyMesh(m_SolidMesh, m_SolidMeshData);
             ApplyMesh(m_FoliageMesh, m_FoliageMeshData);
+            m_SolidMeshFilter.sharedMesh = m_SolidMesh;
         }
 
         public void UpdateMesh()
@@ -230,6 +236,7 @@ namespace Voxels
             MeshCollider.sharedMesh = null;
             ApplyMesh(m_ColliderMesh, m_ColliderMeshData, true);
             MeshCollider.sharedMesh = m_ColliderMesh;
+            m_SolidMeshFilter.sharedMesh = m_SolidMesh;
             Profiler.EndSample();
         }
 
