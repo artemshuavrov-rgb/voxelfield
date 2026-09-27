@@ -42,17 +42,27 @@ namespace Voxels
         [SerializeField] private GameObject m_ChunkPrefab = default;
         [SerializeField] private int m_ChunkSize = default;
         private readonly Stack<Chunk> m_ChunkPool = new();
+        private readonly Queue<Chunk> m_VisualRebuildQueue = new();
+        private readonly HashSet<Chunk> m_VisualRebuildSet = new();
+        private Chunk m_VisualRebuildChunk;
+        private int m_VisualRebuildVersion, m_VisualRebuildX;
+        private VoxelStructuralGravity m_StructuralGravity;
         private int m_PoolSize;
         private MapContainer m_LoadedMap;
 
         public int ChunkSize => m_ChunkSize;
+        public Material TerrainMaterial => m_ChunkPrefab.GetComponentInChildren<MeshRenderer>().sharedMaterial;
         public MapContainer Map { get; private set; }
         public Dictionary<Position3Int, Chunk> Chunks { get; } = new();
         public MapProgressInfo ProgressInfo { get; set; } = new() {stage = MapLoadingStage.Completed};
 
         public IEnumerator LoadMap(MapContainer map)
         {
+            m_VisualRebuildQueue.Clear();
+            m_VisualRebuildSet.Clear();
+            m_VisualRebuildChunk = null;
             Map = map;
+            m_StructuralGravity ??= new VoxelStructuralGravity(this);
             m_LoadedMap = map.Clone();
             SetPoolSize(map);
             // Decommission all current chunks
@@ -63,6 +73,44 @@ namespace Voxels
             yield return ChunkActionForAllStaticMapChunks(map, ChunkActionType.Generate);
             yield return ChunkActionForAllStaticMapChunks(map, ChunkActionType.UpdateMesh);
             ProgressInfo = new MapProgressInfo {stage = MapLoadingStage.Completed};
+        }
+
+        public void QueueVisualRebuild(Chunk chunk)
+        {
+            if (m_VisualRebuildChunk == chunk) return;
+            if (m_VisualRebuildSet.Add(chunk)) m_VisualRebuildQueue.Enqueue(chunk);
+        }
+
+        private void Update()
+        {
+            if (ProgressInfo.stage != MapLoadingStage.Completed) return;
+            // A fixed two coarse-voxel slices per frame bounds the work even
+            // when a blast touches several chunks at once.
+            int slicesLeft = 2;
+            while (slicesLeft > 0)
+            {
+                if (!m_VisualRebuildChunk)
+                {
+                    if (m_VisualRebuildQueue.Count == 0) break;
+                    m_VisualRebuildChunk = m_VisualRebuildQueue.Dequeue();
+                    m_VisualRebuildSet.Remove(m_VisualRebuildChunk);
+                    m_VisualRebuildVersion = m_VisualRebuildChunk.EditVersion;
+                    m_VisualRebuildX = 0;
+                    m_VisualRebuildChunk.BeginVisualRebuild();
+                }
+                if (m_VisualRebuildVersion != m_VisualRebuildChunk.EditVersion)
+                {
+                    m_VisualRebuildVersion = m_VisualRebuildChunk.EditVersion;
+                    m_VisualRebuildX = 0;
+                    m_VisualRebuildChunk.BeginVisualRebuild();
+                }
+                m_VisualRebuildChunk.BuildVisualSlice(m_VisualRebuildX, m_VisualRebuildX + 1);
+                m_VisualRebuildX++;
+                slicesLeft--;
+                if (m_VisualRebuildX < m_ChunkSize) continue;
+                m_VisualRebuildChunk.FinishVisualRebuild();
+                m_VisualRebuildChunk = null;
+            }
         }
 
         private IEnumerator DecommissionAllChunks()
@@ -173,6 +221,7 @@ namespace Voxels
             {
                 TouchedChunks touched = existingTouched ?? TouchedChunks;
                 List<VoxelDestructionSample> destructionSamples = null;
+                List<Position3Int> removedPositions = null;
                 Vector3 destructionOrigin = default;
                 if (change.isUndo)
                 {
@@ -188,6 +237,7 @@ namespace Voxels
                     Position3Int worldPosition = change.position.Value;
                     destructionOrigin = (Vector3) worldPosition + Vector3.one * 0.5f;
                     if (updateSave) destructionSamples = new List<VoxelDestructionSample>(MaxDebrisSamplesPerEdit);
+                    if (updateSave) removedPositions = new List<Position3Int>(96);
                     int removedCount = 0;
                     var sampleRandom = new System.Random(worldPosition.GetHashCode());
                     Random.InitState(worldPosition.GetHashCode());
@@ -213,6 +263,8 @@ namespace Voxels
                             if (removedBlock || removedTerrain)
                             {
                                 removedCount++;
+                                if (removedPositions.Count < 96)
+                                    removedPositions.Add(voxelChunkPosition + chunk.Position * m_ChunkSize);
                                 var sample = new VoxelDestructionSample(
                                     (Vector3)(voxelChunkPosition + chunk.Position * m_ChunkSize) + Vector3.one * 0.5f,
                                     before.color, before.texture);
@@ -351,6 +403,11 @@ namespace Voxels
                             throw new ArgumentOutOfRangeException(nameof(form), form, null);
                     }
                     if (updateSave) Map.voxelChanges.Append(change);
+                    if (removedPositions is {Count: > 0})
+                    {
+                        m_StructuralGravity ??= new VoxelStructuralGravity(this);
+                        m_StructuralGravity.CollapseUnsupported(removedPositions, change.undo, touched);
+                    }
                 }
                 if (existingTouched is null) TouchedChunks.UpdateMesh();
                 if (destructionSamples is {Count: > 0} && !Application.isBatchMode)
@@ -398,7 +455,7 @@ namespace Voxels
             return GetChunkFromPosition(chunkPosition);
         }
 
-        public static void UpdateChunkMesh(Chunk chunk) => chunk.UpdateAndApply();
+        public static void UpdateChunkMesh(Chunk chunk) => chunk.UpdateAndApply(true);
 
         public void AddChunksToUpdateFromVoxel(in Position3Int voxelChunkPosition, Chunk originatingChunk, ICollection<Chunk> chunksToUpdate)
         {

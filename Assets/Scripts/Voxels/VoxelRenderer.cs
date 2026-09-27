@@ -413,6 +413,10 @@ namespace Voxels
         private static readonly Vector3[] CachedPositions = new Vector3[8], CachedVertList = new Vector3[12];
         private static readonly Vector2[] CachedUvs = new Vector2[4];
         private static readonly float[] CachedDensities = new float[8];
+        // Four samples along every original voxel edge. Only cells touching the
+        // surface are subdivided; solid and empty volume stays at the old cost.
+        public const int SurfaceDetail = 4;
+        private static readonly float[] FineDensities = new float[125];
 
         private static readonly ProfilerMarker
             GenerateBlockMarker = new("Generate Block"),
@@ -420,12 +424,14 @@ namespace Voxels
             GenerateVerticesMarker = new("Generate Vertices"),
             AddToMeshMarker = new("Add to Mesh");
 
-        public static void RenderVoxels(ChunkManager manager, Chunk chunk, MeshData solidMesh, MeshData foliageMesh)
+        public static void RenderVoxels(ChunkManager manager, Chunk chunk, MeshData solidMesh, MeshData foliageMesh,
+                                        int detail = SurfaceDetail, int startX = 0, int endX = -1)
         {
             Position3Int lowerBound = manager.Map.dimension.lowerBound;
-            var rawIndex = 0;
             int chunkSize = manager.ChunkSize;
-            for (var x = 0; x < chunkSize; x++)
+            int rawIndex = startX * chunkSize * chunkSize;
+            if (endX < 0) endX = chunkSize;
+            for (var x = startX; x < endX; x++)
             for (var y = 0; y < chunkSize; y++)
             for (var z = 0; z < chunkSize; z++)
             {
@@ -440,7 +446,10 @@ namespace Voxels
                             var orientation = (byte) (i + 1);
                             Voxel? adjacentVoxel = chunk.GetVoxel(new Position3Int(x, y, z) + Adjacents[orientation]);
                             if (adjacentVoxel?.ShouldRenderBlock(orientation) ?? true)
-                                GenerateBlock(ref voxel, x, y, z, orientation, solidMesh);
+                            {
+                                if (detail == 1) GenerateBlock(ref voxel, x, y, z, orientation, solidMesh, true);
+                                else GenerateDetailedBlock(ref voxel, x, y, z, orientation, solidMesh, detail);
+                            }
                         }
                     }
                 }
@@ -470,40 +479,106 @@ namespace Voxels
                         }
                     }
                     if (cubeIndex is 0 or 255) continue;
-                    using (GenerateVerticesMarker.Auto())
+                    if (detail == 1)
                     {
-                        for (var i = 0; i < 12; i++)
-                            CachedVertList[i] = (EdgeTable[cubeIndex] & (1 << i)) != 0
-                                ? InterpolateVertex(CachedPositions[VertIdx1[i]], CachedPositions[VertIdx2[i]],
-                                                    CachedDensities[VertIdx1[i]], CachedDensities[VertIdx2[i]])
-                                : Vector3.zero;
+                        bool foliageGenerated = false;
+                        GenerateSmoothCell(ref voxel, solidMesh, foliageMesh, cubeIndex, ref foliageGenerated, true);
                     }
-                    using (AddToMeshMarker.Auto())
+                    else
+                        GenerateDetailedCell(x, y, z, ref voxel, solidMesh, foliageMesh, detail);
+                }
+            }
+        }
+
+        private static void GenerateDetailedCell(int x, int y, int z, ref Voxel voxel, MeshData solidMesh, MeshData foliageMesh, int detail)
+        {
+            // Trilinear interpolation shares identical values on adjacent coarse
+            // cells, so the quarter-size surface has no cracks at chunk seams.
+            int stride = detail + 1;
+            for (int ix = 0; ix <= detail; ix++)
+            for (int iy = 0; iy <= detail; iy++)
+            for (int iz = 0; iz <= detail; iz++)
+            {
+                float fx = (float) ix / detail, fy = (float) iy / detail, fz = (float) iz / detail;
+                float density = 0f;
+                for (int corner = 0; corner < 8; corner++)
+                {
+                    Position3Int p = Positions[corner];
+                    density += CachedDensities[corner] * (p.x == 0 ? 1f - fx : fx)
+                                                    * (p.y == 0 ? 1f - fy : fy)
+                                                    * (p.z == 0 ? 1f - fz : fz);
+                }
+                FineDensities[ix * stride * stride + iy * stride + iz] = density;
+            }
+
+            bool foliageGenerated = false;
+            for (int ix = 0; ix < detail; ix++)
+            for (int iy = 0; iy < detail; iy++)
+            for (int iz = 0; iz < detail; iz++)
+            {
+                int cubeIndex = 0;
+                for (int corner = 0; corner < 8; corner++)
+                {
+                    Position3Int p = Positions[corner];
+                    int sx = ix + p.x, sy = iy + p.y, sz = iz + p.z;
+                    float density = FineDensities[sx * stride * stride + sy * stride + sz];
+                    CachedDensities[corner] = density;
+                    if (density < IsoLevel) cubeIndex |= 1 << corner;
+                    CachedPositions[corner] = new Vector3(x + (float) sx / detail,
+                                                          y + (float) sy / detail,
+                                                          z + (float) sz / detail);
+                }
+                if (cubeIndex is 0 or 255) continue;
+                GenerateSmoothCell(ref voxel, solidMesh, foliageMesh, cubeIndex, ref foliageGenerated);
+            }
+        }
+
+        private static void GenerateSmoothCell(ref Voxel voxel, MeshData solidMesh, MeshData foliageMesh, int cubeIndex,
+                                               ref bool foliageGenerated, bool colliderOnly = false)
+        {
+            using (GenerateVerticesMarker.Auto())
+            {
+                for (var i = 0; i < 12; i++)
+                    CachedVertList[i] = (EdgeTable[cubeIndex] & (1 << i)) != 0
+                        ? InterpolateVertex(CachedPositions[VertIdx1[i]], CachedPositions[VertIdx2[i]],
+                                            CachedDensities[VertIdx1[i]], CachedDensities[VertIdx2[i]])
+                        : Vector3.zero;
+            }
+            using (AddToMeshMarker.Auto())
+            {
+                for (var i = 0; TriangleTable[cubeIndex][i] != -1; i += 3)
+                {
+                    Vector3 a = CachedVertList[TriangleTable[cubeIndex][i]];
+                    Vector3 b = CachedVertList[TriangleTable[cubeIndex][i + 1]];
+                    Vector3 c = CachedVertList[TriangleTable[cubeIndex][i + 2]];
+                    Vector3 normal = colliderOnly ? default : Vector3.Cross(b - a, c - a).normalized;
+                    for (var j = 0; j < 3; j++)
                     {
-                        for (var i = 0; TriangleTable[cubeIndex][i] != -1; i += 3)
+                        int index = solidMesh.vertices.Count;
+                        solidMesh.vertices.Add(CachedVertList[TriangleTable[cubeIndex][i + j]] - Offset);
+                        if (!colliderOnly)
                         {
-                            for (var j = 0; j < 3; j++)
-                            {
-                                int index = solidMesh.vertices.Count;
-                                solidMesh.vertices.Add(CachedVertList[TriangleTable[cubeIndex][i + j]] - Offset);
-                                solidMesh.colors.Add(voxel.color);
-                                solidMesh.triangleIndices.Add(index);
-                            }
-                            if (voxel is { texture: VoxelTexture.Solid, IsNatural: true })
-                                GenerateFoliage(solidMesh, foliageMesh, ref voxel);
-                            int length = voxel.FaceUVs(CachedUvs);
-                            for (var j = 0; j < length; j++) solidMesh.uvs.Add(CachedUvs[j]);
+                            solidMesh.colors.Add(voxel.color);
+                            solidMesh.normals.Add(normal);
                         }
+                        solidMesh.triangleIndices.Add(index);
+                    }
+                    if (!foliageGenerated && foliageMesh != null && voxel is { texture: VoxelTexture.Solid, IsNatural: true })
+                        foliageGenerated = GenerateFoliage(solidMesh, foliageMesh, ref voxel);
+                    if (!colliderOnly)
+                    {
+                        int length = voxel.FaceUVs(CachedUvs);
+                        for (var j = 0; j < length; j++) solidMesh.uvs.Add(CachedUvs[j]);
                     }
                 }
             }
         }
 
-        private static void GenerateFoliage(MeshData solidMesh, MeshData foliageMesh, ref Voxel voxel)
+        private static bool GenerateFoliage(MeshData solidMesh, MeshData foliageMesh, ref Voxel voxel)
         {
             Vector3 normal = Vector3.Cross(solidMesh.vertices.FromEnd(2) - solidMesh.vertices.FromEnd(0),
                                            solidMesh.vertices.FromEnd(1) - solidMesh.vertices.FromEnd(0));
-            if (normal.y < 0.0f) return;
+            if (normal.y < 0.0f) return false;
             foliageMesh.vertices.Add(solidMesh.vertices.FromEnd(1) + Vector3.up);
             foliageMesh.vertices.Add(solidMesh.vertices.FromEnd(1));
             foliageMesh.vertices.Add(solidMesh.vertices.FromEnd(0));
@@ -524,6 +599,7 @@ namespace Voxels
             foliageMesh.uvs.Add(uv + new Vector2 {x = Voxel.TileRatio});
             foliageMesh.uvs.Add(uv);
             foliageMesh.uvs.Add(uv + new Vector2 {y = Voxel.TileRatio});
+            return true;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -534,14 +610,20 @@ namespace Voxels
             color.b = (byte) Mathf.RoundToInt(color.b * amount);
         }
 
-        private static void GenerateBlock(ref Voxel voxel, int x, int y, int z, byte dir, MeshData meshData)
+        private static void GenerateBlock(ref Voxel voxel, int x, int y, int z, byte dir, MeshData meshData, bool colliderOnly)
         {
             Color32 color = voxel.color;
             if (!voxel.IsBreakable) color.Diminish(0.7f);
+            Vector3[] face = BlockVerts[dir];
+            Vector3 normal = colliderOnly ? default : Vector3.Cross(face[1] - face[0], face[2] - face[0]).normalized;
             foreach (Vector3 vert in BlockVerts[dir])
             {
                 meshData.vertices.Add(new Vector3(x, y, z) + vert);
-                meshData.colors.Add(color);
+                if (!colliderOnly)
+                {
+                    meshData.colors.Add(color);
+                    meshData.normals.Add(normal);
+                }
             }
             meshData.triangleIndices.Add(meshData.vertices.Count - 4);
             meshData.triangleIndices.Add(meshData.vertices.Count - 3);
@@ -549,9 +631,53 @@ namespace Voxels
             meshData.triangleIndices.Add(meshData.vertices.Count - 4);
             meshData.triangleIndices.Add(meshData.vertices.Count - 2);
             meshData.triangleIndices.Add(meshData.vertices.Count - 1);
-            int length = voxel.FaceUVs(CachedUvs);
-            for (var i = 0; i < length; i++) meshData.uvs.Add(CachedUvs[i]);
+            if (!colliderOnly)
+            {
+                int length = voxel.FaceUVs(CachedUvs);
+                for (var i = 0; i < length; i++) meshData.uvs.Add(CachedUvs[i]);
+            }
         }
+
+        private static void GenerateDetailedBlock(ref Voxel voxel, int x, int y, int z, byte dir, MeshData meshData, int detail)
+        {
+            Vector3[] corners = BlockVerts[dir];
+            voxel.FaceUVs(CachedUvs);
+            Vector3 origin = new(x, y, z);
+            Color32 color = voxel.color;
+            if (!voxel.IsBreakable) color.Diminish(0.7f);
+            Vector3 normal = Vector3.Cross(corners[1] - corners[0], corners[2] - corners[0]).normalized;
+            for (int row = 0; row < detail; row++)
+            for (int col = 0; col < detail; col++)
+            {
+                float s0 = (float) col / detail, s1 = (float) (col + 1) / detail;
+                float t0 = (float) row / detail, t1 = (float) (row + 1) / detail;
+                int index = meshData.vertices.Count;
+                meshData.vertices.Add(origin + Bilinear(corners, s0, t0));
+                meshData.vertices.Add(origin + Bilinear(corners, s0, t1));
+                meshData.vertices.Add(origin + Bilinear(corners, s1, t1));
+                meshData.vertices.Add(origin + Bilinear(corners, s1, t0));
+                int hash = unchecked(x * 73856093 ^ y * 19349663 ^ z * 83492791 ^ row * 26544357 ^ col * 97531 ^ dir);
+                float shade = 0.94f + (hash & 7) * 0.012f;
+                Color32 facet = new((byte) Mathf.Min(255, color.r * shade),
+                                    (byte) Mathf.Min(255, color.g * shade),
+                                    (byte) Mathf.Min(255, color.b * shade), color.a);
+                for (int i = 0; i < 4; i++)
+                {
+                    meshData.colors.Add(facet);
+                    meshData.normals.Add(normal);
+                }
+                meshData.triangleIndices.Add(index);
+                meshData.triangleIndices.Add(index + 1);
+                meshData.triangleIndices.Add(index + 2);
+                meshData.triangleIndices.Add(index);
+                meshData.triangleIndices.Add(index + 2);
+                meshData.triangleIndices.Add(index + 3);
+                for (int i = 0; i < 4; i++) meshData.uvs.Add(CachedUvs[i]);
+            }
+        }
+
+        private static Vector3 Bilinear(Vector3[] corners, float s, float t)
+            => Vector3.Lerp(Vector3.Lerp(corners[0], corners[3], s), Vector3.Lerp(corners[1], corners[2], s), t);
 
         private static Vector3 InterpolateVertex(in Vector3 p1, in Vector3 p2, float v1, float v2)
         {

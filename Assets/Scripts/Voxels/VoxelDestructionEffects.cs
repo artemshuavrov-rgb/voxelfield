@@ -82,6 +82,12 @@ namespace Voxels
         }
 
         public void Emit(IReadOnlyList<VoxelDestructionSample> samples, Vector3 origin)
+            => EmitPieces(samples, origin, false);
+
+        public void EmitCollapse(IReadOnlyList<VoxelDestructionSample> samples, Vector3 center)
+            => EmitPieces(samples, center, true);
+
+        private void EmitPieces(IReadOnlyList<VoxelDestructionSample> samples, Vector3 origin, bool collapse)
         {
             if (!m_Initialized || samples.Count == 0) return;
 
@@ -95,8 +101,10 @@ namespace Voxels
                     Piece piece = GetPiece();
                     Vector3 outward = (sample.position - origin).normalized;
                     Vector3 scatter = Random.insideUnitSphere;
-                    Vector3 direction = (outward * 0.65f + scatter * 0.8f + Vector3.up * 0.8f).normalized;
-                    float size = Random.Range(0.12f, 0.31f);
+                    Vector3 direction = collapse
+                        ? (outward * 0.35f + scatter * 0.25f + Vector3.down).normalized
+                        : (outward * 0.65f + scatter * 0.8f + Vector3.up * 0.8f).normalized;
+                    float size = collapse ? Random.Range(0.25f, 0.55f) : Random.Range(0.12f, 0.31f);
                     piece.gameObject.SetActive(true);
                     piece.gameObject.transform.position = sample.position + scatter * 0.18f;
                     piece.gameObject.transform.rotation = Random.rotation;
@@ -109,7 +117,7 @@ namespace Voxels
                     m_Properties.SetColor("_EmissionColor", tint * 0.22f);
                     m_Properties.SetFloat("_DebrisColorStrength", 0.48f);
                     piece.renderer.SetPropertyBlock(m_Properties);
-                    piece.body.linearVelocity = direction * Random.Range(2.8f, 7.2f);
+                    piece.body.linearVelocity = direction * (collapse ? Random.Range(1.5f, 3.5f) : Random.Range(2.8f, 7.2f));
                     piece.body.angularVelocity = Random.insideUnitSphere * Random.Range(4f, 12f);
                 }
 

@@ -15,17 +15,19 @@ namespace Voxels
         [SerializeField] private Material m_FoliageMaterial = default;
         [SerializeField, Layer] private int m_Layer = default;
 
-        private readonly MeshData m_SolidMeshData = new(), m_FoliageMeshData = new();
+        private readonly MeshData m_SolidMeshData = new(), m_FoliageMeshData = new(), m_ColliderMeshData = new();
 
         private ChunkManager m_ChunkManager;
-        private Mesh m_SolidMesh, m_FoliageMesh;
+        private Mesh m_SolidMesh, m_FoliageMesh, m_ColliderMesh;
         private MeshRenderer[] m_Renderers;
         private Position3Int m_Position;
         private bool m_InCommission, m_Generating, m_Updating;
+        private int m_EditVersion;
         private int m_ChunkSize;
         private Voxel[] m_Voxels;
 
         public MeshCollider MeshCollider { get; private set; }
+        public int EditVersion => m_EditVersion;
         public ref Position3Int Position => ref m_Position;
 
         public override int GetHashCode() => m_Position.GetHashCode();
@@ -37,10 +39,12 @@ namespace Voxels
             m_SolidMesh = m_SolidMeshFilter.mesh;
             m_SolidMesh.indexFormat = IndexFormat.UInt32;
             m_FoliageMesh = new Mesh {indexFormat = IndexFormat.UInt32};
+            m_ColliderMesh = new Mesh {indexFormat = IndexFormat.UInt32};
             MeshCollider = GetComponent<MeshCollider>();
             m_Renderers = GetComponentsInChildren<MeshRenderer>();
             m_SolidMesh.MarkDynamic();
             m_FoliageMesh.MarkDynamic();
+            m_ColliderMesh.MarkDynamic();
         }
 
         private void Update()
@@ -75,6 +79,7 @@ namespace Voxels
         {
             ClearMeshes();
             m_SolidMeshData.Clear();
+            m_ColliderMeshData.Clear();
             m_InCommission = inCommission;
             foreach (MeshRenderer meshRenderer in m_Renderers) meshRenderer.enabled = m_InCommission;
         }
@@ -82,7 +87,8 @@ namespace Voxels
         private void ClearMeshes()
         {
             m_SolidMesh.Clear();
-            if (MeshCollider.sharedMesh) MeshCollider.sharedMesh.Clear();
+            MeshCollider.sharedMesh = null;
+            m_ColliderMesh.Clear();
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -163,10 +169,44 @@ namespace Voxels
             //     Gizmos.DrawWireSphere(m_Position * m_ChunkSize + new Vector3(x, y, z), 0.02f);
         }
 
-        public void UpdateAndApply()
+        public void UpdateAndApply(bool immediate = false)
         {
-            UpdateMesh();
-            ApplyMesh();
+            if (immediate || !Application.isPlaying)
+            {
+                UpdateMesh();
+                ApplyMesh();
+            }
+            else
+            {
+                m_EditVersion++;
+                UpdateColliderMesh();
+                m_ChunkManager.QueueVisualRebuild(this);
+            }
+        }
+
+        private void UpdateColliderMesh()
+        {
+            m_ColliderMeshData.Clear();
+            VoxelRenderer.RenderVoxels(m_ChunkManager, this, m_ColliderMeshData, null, 1);
+            MeshCollider.sharedMesh = null;
+            ApplyMesh(m_ColliderMesh, m_ColliderMeshData, true);
+            MeshCollider.sharedMesh = m_ColliderMesh;
+        }
+
+        public void BeginVisualRebuild()
+        {
+            m_SolidMeshData.Clear();
+            m_FoliageMeshData.Clear();
+        }
+
+        public void BuildVisualSlice(int startX, int endX)
+            => VoxelRenderer.RenderVoxels(m_ChunkManager, this, m_SolidMeshData, m_FoliageMeshData,
+                                          VoxelRenderer.SurfaceDetail, startX, endX);
+
+        public void FinishVisualRebuild()
+        {
+            ApplyMesh(m_SolidMesh, m_SolidMeshData);
+            ApplyMesh(m_FoliageMesh, m_FoliageMeshData);
         }
 
         public void UpdateMesh()
@@ -175,7 +215,9 @@ namespace Voxels
             m_Updating = true;
             m_SolidMeshData.Clear();
             m_FoliageMeshData.Clear();
+            m_ColliderMeshData.Clear();
             VoxelRenderer.RenderVoxels(m_ChunkManager, this, m_SolidMeshData, m_FoliageMeshData);
+            VoxelRenderer.RenderVoxels(m_ChunkManager, this, m_ColliderMeshData, null, 1);
             m_Updating = false;
             Profiler.EndSample();
         }
@@ -185,19 +227,25 @@ namespace Voxels
             Profiler.BeginSample("Apply Mesh");
             ApplyMesh(m_SolidMesh, m_SolidMeshData);
             ApplyMesh(m_FoliageMesh, m_FoliageMeshData);
-            MeshCollider.sharedMesh = m_SolidMesh;
+            MeshCollider.sharedMesh = null;
+            ApplyMesh(m_ColliderMesh, m_ColliderMeshData, true);
+            MeshCollider.sharedMesh = m_ColliderMesh;
             Profiler.EndSample();
         }
 
-        private static void ApplyMesh(Mesh mesh, MeshData data)
+        private static void ApplyMesh(Mesh mesh, MeshData data, bool colliderOnly = false)
         {
             Profiler.BeginSample("Set General");
             mesh.Clear();
             mesh.SetVertices(data.vertices);
             mesh.SetIndices(data.triangleIndices, MeshTopology.Triangles, 0);
-            mesh.SetUVs(0, data.uvs);
-            mesh.SetColors(data.colors);
+            if (!colliderOnly)
+            {
+                mesh.SetUVs(0, data.uvs);
+                mesh.SetColors(data.colors);
+            }
             Profiler.EndSample();
+            if (colliderOnly) return;
             if (data.normals.Count == 0) mesh.RecalculateNormals();
             else mesh.SetNormals(data.normals);
             // Profiler.BeginSample("Calculate Tangents");
